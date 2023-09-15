@@ -1,3 +1,7 @@
+metadata name = 'Microsoft Azure SQL Managed Instance'
+metadata description = 'Creates Azure SQL Managed Instance'
+metadata owner = 'luis-aranda'
+
 @description('Enter managed instance name.')
 param managedInstanceName string
 
@@ -60,11 +64,11 @@ param allow_linkedserver bool = false
 @description('Controls if public endpoint (port 3342) be enabled')
 param enable_public_endpoint bool = false
 
-var networkSecurityGroupName_var = 'SQLMI-${managedInstanceName}-NSG'
-var routeTableName_var = 'SQLMI-${managedInstanceName}-Route-Table'
+var networkSecurityGroupName = 'SQLMI-${managedInstanceName}-NSG'
+var routeTableName = 'SQLMI-${managedInstanceName}-Route-Table'
 
-resource networkSecurityGroupName 'Microsoft.Network/networkSecurityGroups@2020-06-01' = {
-  name: networkSecurityGroupName_var
+resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2020-06-01' = {
+  name: networkSecurityGroupName
   location: location
   properties: {
     securityRules: [
@@ -130,7 +134,7 @@ resource networkSecurityGroupName 'Microsoft.Network/networkSecurityGroups@2020-
 
 resource nsg_public_endpoint 'Microsoft.Network/networkSecurityGroups/securityRules@2019-11-01' = if (enable_public_endpoint) {
   name: 'public_endpoint_inbound'
-  parent: networkSecurityGroupName
+  parent: networkSecurityGroup
   properties: {
     description: 'Allow inbound traffic to Managed Instance through public endpoint'
           protocol: 'Tcp'
@@ -147,7 +151,7 @@ resource nsg_public_endpoint 'Microsoft.Network/networkSecurityGroups/securityRu
 
 resource nsgrule_ls 'Microsoft.Network/networkSecurityGroups/securityRules@2019-11-01' = if(allow_linkedserver){
   name: 'allow_linkedserver_outbound'
-  parent: networkSecurityGroupName
+  parent: networkSecurityGroup
   properties: {
     description: 'Allows connecting to port 1433 for linked server from SQL MI'
     protocol: '*'
@@ -163,7 +167,7 @@ resource nsgrule_ls 'Microsoft.Network/networkSecurityGroups/securityRules@2019-
 
 resource nsgrule_ls_redirect 'Microsoft.Network/networkSecurityGroups/securityRules@2019-11-01' = if(allow_linkedserver){
   name: 'allow_redirect_outbound'
-  parent: networkSecurityGroupName
+  parent: networkSecurityGroup
   properties: {
     description: 'Allows connecting to port range 11000-11999 for linked server from SQL MI'
     protocol: '*'
@@ -177,8 +181,8 @@ resource nsgrule_ls_redirect 'Microsoft.Network/networkSecurityGroups/securityRu
   }
 }
 
-resource routeTableName 'Microsoft.Network/routeTables@2020-06-01' = {
-  name: routeTableName_var
+resource routeTable 'Microsoft.Network/routeTables@2020-06-01' = {
+  name: routeTableName
   location: location
   properties: {
     disableBgpRoutePropagation: false
@@ -200,10 +204,10 @@ resource virtualNetworkName_resource 'Microsoft.Network/virtualNetworks@2020-06-
         properties: {
           addressPrefix: subnetPrefix
           routeTable: {
-            id: routeTableName.id
+            id: routeTable.id
           }
           networkSecurityGroup: {
-            id: networkSecurityGroupName.id
+            id: networkSecurityGroup.id
           }
           delegations: [
             {
