@@ -43,6 +43,7 @@ terraform.rc
 **/azuredeploy.parameters.?.json
 **/prereq.azuredeploy.parameters.?.json
 **/prereq.azuredeploy.parameters.dev.json
+*.bicepparam
 
 # secrets
 **/*.pfx

@@ -12,8 +12,11 @@ param administratorLogin string
 @secure()
 param administratorLoginPassword string
 
-@description('Enter location. If you leave this field blank resource group location would be used.')
-param location string = resourceGroup().location
+@description('Enter primary region. This will be used for the mandatory route to the primary storage account and SQL MI location.If you leave this field blank resource group location would be used.')
+param primaryRegion string = resourceGroup().location
+
+@description('Enter secondary region. This will be used for the mandatory route to the secondary storage account.')
+param secondaryRegion string
 
 @description('Enter virtual network name. If you leave this field blank name will be created by the template.')
 param virtualNetworkName string = 'SQLMI-VNET'
@@ -61,29 +64,114 @@ param licenseType string = 'LicenseIncluded'
 
 param allow_linkedserver bool = false
 
-@description('Controls if public endpoint (port 3342) be enabled')
+@description('Controls if public endpoint (port 3342) will be enabled')
 param enable_public_endpoint bool = false
 
 var networkSecurityGroupName = 'SQLMI-${managedInstanceName}-NSG'
 var routeTableName = 'SQLMI-${managedInstanceName}-Route-Table'
+var subnetPrefixString = replace(replace(subnetPrefix, '/', '-'), '.', '-')
 
 resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2020-06-01' = {
   name: networkSecurityGroupName
-  location: location
+  location: primaryRegion
   properties: {
     securityRules: [
       {
-        name: 'allow_tds_inbound'
+        name: 'Microsoft.Sql-managedInstances_UseOnly_mi-healthprobe-in-${subnetPrefixString}-v11'
         properties: {
-          description: 'Allow access to data'
-          protocol: 'Tcp'
+          description: 'Allow Azure Load Balancer inbound traffic'
+          protocol: '*'
           sourcePortRange: '*'
-          destinationPortRange: '1433'
-          sourceAddressPrefix: 'VirtualNetwork'
-          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
+          sourceAddressPrefix: 'AzureLoadBalancer'
+          destinationAddressPrefix: subnetPrefix
           access: 'Allow'
-          priority: 1000
+          priority: 100
           direction: 'Inbound'
+        }
+      }
+      {
+        name: 'Microsoft.Sql-managedInstances_UseOnly_mi-internal-in-${subnetPrefixString}-v11'
+        properties: {
+          description: 'Allow MI internal inbound traffic'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRange: '*'
+          sourceAddressPrefix: subnetPrefix
+          destinationAddressPrefix: subnetPrefix
+          access: 'Allow'
+          priority: 101
+          direction: 'Inbound'
+        }
+      }
+      {
+        name: 'Microsoft.Sql-managedInstances_UseOnly_mi-aad-out-${subnetPrefixString}-v11'
+        properties: {
+          description: 'Allow communication with Azure Active Directory over https'
+          protocol: 'TCP'
+          sourcePortRange: '*'
+          destinationPortRange: '443'
+          sourceAddressPrefix: subnetPrefix
+          destinationAddressPrefix: 'AzureActiveDirectory'
+          access: 'Allow'
+          priority: 101
+          direction: 'Outbound'
+        }
+      }
+      {
+        name: 'Microsoft.Sql-managedInstances_UseOnly_mi-onedsc-out-${subnetPrefixString}-v11'
+        properties: {
+          description: 'Allow communication with the One DS Collector over https'
+          protocol: 'TCP'
+          sourcePortRange: '*'
+          destinationPortRange: '443'
+          sourceAddressPrefix: subnetPrefix
+          destinationAddressPrefix: 'OneDsCollector'
+          access: 'Allow'
+          priority: 102
+          direction: 'Outbound'
+        }
+      }
+      {
+        name: 'Microsoft.Sql-managedInstances_UseOnly_mi-internal-out-${subnetPrefixString}-v11'
+        properties: {
+          description: 'Allow MI internal outbound traffic'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRange: '*'
+          sourceAddressPrefix: subnetPrefix
+          destinationAddressPrefix: subnetPrefix
+          access: 'Allow'
+          priority: 103
+          direction: 'Outbound'
+        }
+      }
+      {
+        name: 'Microsoft.Sql-managedInstances_UseOnly_mi-strg-p-out-${subnetPrefixString}-v11'
+        properties: {
+          description: 'Allow outbound communication with storage primary over HTTPS'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRange: '443'
+          sourceAddressPrefix: subnetPrefix
+          destinationAddressPrefix: 'Storage.${primaryRegion}'
+          access: 'Allow'
+          priority: 104
+          direction: 'Outbound'
+        }
+      }
+      {
+        name: 'Microsoft.Sql-managedInstances_UseOnly_mi-strg-s-out-${subnetPrefixString}-v11'
+        properties: {
+          description: 'Allow outbound communication with storage secondary over HTTPS'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRange: '443'
+          sourceAddressPrefix: subnetPrefix
+          destinationAddressPrefix: 'Storage.${secondaryRegion}'
+          access: 'Allow'
+          priority: 105
+          direction: 'Outbound'
         }
       }
       {
@@ -100,34 +188,6 @@ resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2020-06-0
           direction: 'Inbound'
         }
       }
-      {
-        name: 'deny_all_inbound'
-        properties: {
-          description: 'Deny all other inbound traffic'
-          protocol: '*'
-          sourcePortRange: '*'
-          destinationPortRange: '*'
-          sourceAddressPrefix: '*'
-          destinationAddressPrefix: '*'
-          access: 'Deny'
-          priority: 4096
-          direction: 'Inbound'
-        }
-      }
-      {
-        name: 'deny_all_outbound'
-        properties: {
-          description: 'Deny all other outbound traffic'
-          protocol: '*'
-          sourcePortRange: '*'
-          destinationPortRange: '*'
-          sourceAddressPrefix: '*'
-          destinationAddressPrefix: '*'
-          access: 'Deny'
-          priority: 4096
-          direction: 'Outbound'
-        }
-      }
     ]
   }
 }
@@ -137,19 +197,19 @@ resource nsg_public_endpoint 'Microsoft.Network/networkSecurityGroups/securityRu
   parent: networkSecurityGroup
   properties: {
     description: 'Allow inbound traffic to Managed Instance through public endpoint'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRange: '3342'
-          sourceAddressPrefix: '*'
-          destinationAddressPrefix: '*'
-          access: 'Allow'
-          priority: 1300
-          direction: 'Inbound'
+    protocol: 'Tcp'
+    sourcePortRange: '*'
+    destinationPortRange: '3342'
+    sourceAddressPrefix: '*'
+    destinationAddressPrefix: '*'
+    access: 'Allow'
+    priority: 1200
+    direction: 'Inbound'
   }
-  
+
 }
 
-resource nsgrule_ls 'Microsoft.Network/networkSecurityGroups/securityRules@2019-11-01' = if(allow_linkedserver){
+resource nsgrule_ls 'Microsoft.Network/networkSecurityGroups/securityRules@2019-11-01' = if (allow_linkedserver) {
   name: 'allow_linkedserver_outbound'
   parent: networkSecurityGroup
   properties: {
@@ -165,7 +225,7 @@ resource nsgrule_ls 'Microsoft.Network/networkSecurityGroups/securityRules@2019-
   }
 }
 
-resource nsgrule_ls_redirect 'Microsoft.Network/networkSecurityGroups/securityRules@2019-11-01' = if(allow_linkedserver){
+resource nsgrule_ls_redirect 'Microsoft.Network/networkSecurityGroups/securityRules@2019-11-01' = if (allow_linkedserver) {
   name: 'allow_redirect_outbound'
   parent: networkSecurityGroup
   properties: {
@@ -183,15 +243,57 @@ resource nsgrule_ls_redirect 'Microsoft.Network/networkSecurityGroups/securityRu
 
 resource routeTable 'Microsoft.Network/routeTables@2020-06-01' = {
   name: routeTableName
-  location: location
+  location: primaryRegion
   properties: {
     disableBgpRoutePropagation: false
+    routes: [
+      {
+        id: 'Microsoft.Sql-managedInstances_UseOnly_mi-AzureActiveDirectory'
+        name: 'Microsoft.Sql-managedInstances_UseOnly_mi-AzureActiveDirectory'
+        properties: {
+          addressPrefix: 'AzureActiveDirectory'
+          nextHopType: 'Internet'
+        }
+      }
+      {
+        id: 'Microsoft.Sql-managedInstances_UseOnly_mi-OneDsCollector'
+        name: 'Microsoft.Sql-managedInstances_UseOnly_mi-OneDsCollector'
+        properties: {
+          addressPrefix: 'OneDsCollector'
+          nextHopType: 'Internet'
+        }
+      }
+      {
+        id: 'Microsoft.Sql-managedInstances_UseOnly_mi-Storage.primaryRegion'
+        name: 'Microsoft.Sql-managedInstances_UseOnly_mi-Storage.${primaryRegion}'
+        properties: {
+          addressPrefix: 'Storage.${primaryRegion}'
+          nextHopType: 'Internet'
+        }
+      }
+      {
+        id: 'Microsoft.Sql-managedInstances_UseOnly_mi-Storage.secondaryRegion'
+        name: 'Microsoft.Sql-managedInstances_UseOnly_mi-Storage.${secondaryRegion}'
+        properties: {
+          addressPrefix: 'Storage.${secondaryRegion}'
+          nextHopType: 'Internet'
+        }
+      }
+      {
+        id: 'Microsoft.Sql-managedInstances_UseOnly_subnet-to-vnetlocal'
+        name: 'Microsoft.Sql-managedInstances_UseOnly_subnet-${subnetPrefixString}-to-vnetlocal'
+        properties: {
+          addressPrefix: subnetPrefix
+          nextHopType: 'VnetLocal'
+        }
+      }
+    ]
   }
 }
 
-resource virtualNetworkName_resource 'Microsoft.Network/virtualNetworks@2020-06-01' = {
+resource virtualNetwork 'Microsoft.Network/virtualNetworks@2020-06-01' = {
   name: virtualNetworkName
-  location: location
+  location: primaryRegion
   properties: {
     addressSpace: {
       addressPrefixes: [
@@ -223,9 +325,9 @@ resource virtualNetworkName_resource 'Microsoft.Network/virtualNetworks@2020-06-
   }
 }
 
-resource managedInstanceName_resource 'Microsoft.Sql/managedInstances@2020-02-02-preview' = {
+resource managedInstance 'Microsoft.Sql/managedInstances@2020-02-02-preview' = {
   name: managedInstanceName
-  location: location
+  location: primaryRegion
   sku: {
     name: skuName
   }
@@ -242,6 +344,6 @@ resource managedInstanceName_resource 'Microsoft.Sql/managedInstances@2020-02-02
     publicDataEndpointEnabled: enable_public_endpoint
   }
   dependsOn: [
-    virtualNetworkName_resource
+    virtualNetwork
   ]
 }
