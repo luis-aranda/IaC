@@ -338,7 +338,7 @@ data "azurerm_key_vault_secret" "administrator_login_password" {
   key_vault_id = data.azurerm_key_vault.kv.id
 }
 
-resource "azurerm_sql_managed_instance" "sqlmi" {
+resource "azurerm_mssql_managed_instance" "sqlmi" {
   name                         = "sqlmi-${local.suffix}"
   resource_group_name          = azurerm_resource_group.rg.name
   location                     = var.location
@@ -374,5 +374,5 @@ output "resource-group-name" {
 }
 
 output "sqlmi-name" {
-  value = azurerm_sql_managed_instance.sqlmi.name
+  value = azurerm_mssql_managed_instance.sqlmi.name
 }
